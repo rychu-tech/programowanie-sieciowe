@@ -8,7 +8,7 @@
 #include <unistd.h>
 
 #define SERVER_PORT 12345
-#define CLIENT_PORT 99
+#define CLIENT_PORT 0
 #define MAX_MSG_SIZE 1024
 
 int main() {
