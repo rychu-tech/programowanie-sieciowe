@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <stdbool.h>
 
 #define SERVER_PORT 67
 #define DHCP_CLIENT_PORT 68
@@ -29,6 +30,7 @@ typedef struct {
     uint8_t octets[4];
     ip_status status;
     time_t *timestamp;
+    const char *mac_address;
 } ip_address;
 
 typedef struct {
@@ -58,6 +60,7 @@ void initialize_ip_pool(ip_address* pool) {
         pool[i-2].octets[3] = i;
         pool[i-2].status = FREE;
         pool[i-2].timestamp = NULL;
+        pool[i-2].mac_address = NULL;
     }
 }
 
@@ -83,6 +86,7 @@ void clean_ip_pool(ip_address* pool) {
             if (*pool[i].timestamp + RENEWAL_TIME <= time(NULL)) {
                 pool[i].timestamp = NULL;
                 pool[i].status = FREE;
+                pool[i].mac_address = NULL;
                 printf("IP POOL CLEANED UP");
             }
         }
@@ -94,17 +98,34 @@ void print_mac_address(const unsigned char* mac_address) {
     printf("MAC address: %02x:%02x:%02x:%02x:%02x:%02x\n", mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5]);
 }
 
-ip_address* get_free_ip(ip_address* pool) {
-    for (int i = 0; i < IP_POOL_SIZE - 2; i++) {
-        if (pool[i].status == FREE) {
-            if (pool[i].timestamp == NULL) {
-                pool[i].timestamp = malloc(sizeof(time_t));
+ip_address* get_free_ip(ip_address* pool, const uint8_t *chaddr) {
+    char* mac_address = malloc(17 * sizeof(char));
+    printf("\n\n\n");
+    sprintf(mac_address,"%02x:%02x:%02x:%02x:%02x:%02x", chaddr[0], chaddr[1], chaddr[2], chaddr[3], chaddr[4], chaddr[5]);
+    printf("%s\n\n", mac_address);
+    int i = 0;
+    for (i = 0; i < IP_POOL_SIZE - 2; i++) {
+        if (pool[i].mac_address != NULL) {
+            if(strcmp(mac_address, (pool[i].mac_address)) == 0) {
+                pool[i].status = TAKEN;
+                *(pool[i].timestamp) = *(pool[i].timestamp) + LEASE_TIME;
+                return &pool[i];
             }
+        }
+        
+    }
+    
+    for (i = 0; i < IP_POOL_SIZE - 2; i++) {
+        if (pool[i].status == FREE) {
+            pool[i].timestamp = malloc(sizeof(time_t));
             pool[i].status = IN_PROGRESS;
+            pool[i].mac_address = mac_address;
             *(pool[i].timestamp) = time(NULL);
             return &pool[i];
         }
     }
+    
+
     return NULL;
 }
 
@@ -119,15 +140,6 @@ int create_offer_packet(dhcp_packet *offer_packet, dhcp_packet *discovery_packet
     offer_packet->secs = 0; // No seconds elapsed
     offer_packet->flags = htons(0x8000); // Broadcast flag
 
-    ip_address* free_ip = get_free_ip(pool);
-    char* ip_str = malloc(16 * sizeof(char));
-    if (free_ip != NULL) {
-        sprintf(ip_str, "%d.%d.%d.%d", free_ip->octets[0], free_ip->octets[1], free_ip->octets[2], free_ip->octets[3]);
-        offer_packet->yiaddr.s_addr = inet_addr(ip_str);
-        
-    } else {
-        printf("No free addresses available!\n");
-    }
     // offer_packet->yiaddr.s_addr = inet_addr(DHCP_IP_RANGE_START); // Offered IP address
     offer_packet->siaddr.s_addr = inet_addr(DHCP_SERVER_IP); // Server address 
     offer_packet->ciaddr.s_addr = 0;
@@ -164,6 +176,19 @@ int create_offer_packet(dhcp_packet *offer_packet, dhcp_packet *discovery_packet
     offer_packet->options[22] = 4; // Option data length
     *(uint32_t *)(&offer_packet->options[23]) = htonl(RENEWAL_TIME); // Convert renewal time to network byte order and store in packet
     offer_packet->options[27] = 255; // End option
+
+
+    ip_address* free_ip = get_free_ip(pool, offer_packet->chaddr);
+    print_ip_address(*free_ip);
+    char* ip_str = malloc(16 * sizeof(char));
+    if (free_ip != NULL) {
+        sprintf(ip_str, "%d.%d.%d.%d", free_ip->octets[0], free_ip->octets[1], free_ip->octets[2], free_ip->octets[3]);
+        offer_packet->yiaddr.s_addr = inet_addr(ip_str);
+        
+    } else {
+        printf("No free addresses available!\n");
+    }
+
     return sizeof(dhcp_packet);
 }
 
@@ -180,6 +205,7 @@ uint32_t extract_requested_ip(dhcp_packet *packet) {
 }
 
 int create_ack_packet(dhcp_packet *ack_packet, dhcp_packet *request_packet, uint32_t requested_ip, ip_address* pool) {
+    print_ip_pool(pool);
     printf("Requested IP address: %s\n", inet_ntoa(*(struct in_addr *)&requested_ip));
     memset(ack_packet, 0, sizeof(dhcp_packet));
     ack_packet->op = 2; // Boot reply
@@ -190,30 +216,7 @@ int create_ack_packet(dhcp_packet *ack_packet, dhcp_packet *request_packet, uint
     ack_packet->secs = 0; // No seconds elapsed
     ack_packet->flags = htons(0x8000); // Broadcast flag
 
-    int isFree = 1;
-    char* ip_str = malloc(16 * sizeof(char));
-    for (int i = 0; i < IP_POOL_SIZE - 2; i++) {
-        sprintf(ip_str, "%d.%d.%d.%d", pool[i].octets[0], pool[i].octets[1], pool[i].octets[2], pool[i].octets[3]);
-        // printf("%s\n\n", ip_str);
-        // printf("%s\n\n", inet_ntoa(*(struct in_addr *)&requested_ip));
-        if (strcmp(inet_ntoa(*(struct in_addr *)&requested_ip),ip_str) == 0) {
-            isFree = 0;
-            break;
-        }
-    }
-    if (isFree == 0) {
-        ip_address* free_ip = get_free_ip(pool);
-        char* ip_str = malloc(16 * sizeof(char));
-        if (free_ip != NULL) {
-            sprintf(ip_str, "%d.%d.%d.%d", free_ip->octets[0], free_ip->octets[1], free_ip->octets[2], free_ip->octets[3]);
-            ack_packet->yiaddr.s_addr = inet_addr(ip_str);   
-        } else {
-            printf("No free addresses available!\n");
-        }
-    }
-    else {
-        ack_packet->yiaddr.s_addr = inet_addr(inet_ntoa(*(struct in_addr *)&requested_ip)); 
-    }
+    
 
     // ack_packet->yiaddr.s_addr = inet_addr(inet_ntoa(*(struct in_addr *)&requested_ip)); // Assigned IP address
     // ack_packet->yiaddr.s_addr = inet_addr("192.168.1.154");
@@ -252,6 +255,18 @@ int create_ack_packet(dhcp_packet *ack_packet, dhcp_packet *request_packet, uint
     ack_packet->options[22] = 4; // Option data length
     *(uint32_t *)(&ack_packet->options[23]) = htonl(RENEWAL_TIME); // Convert renewal time to network byte order and store in packet
     ack_packet->options[27] = 255; // End option
+
+
+
+    ip_address* free_ip = get_free_ip(pool, ack_packet->chaddr);
+    char* ip_str = malloc(16 * sizeof(char));
+    if (free_ip != NULL) {
+        sprintf(ip_str, "%d.%d.%d.%d", free_ip->octets[0], free_ip->octets[1], free_ip->octets[2], free_ip->octets[3]);
+        ack_packet->yiaddr.s_addr = inet_addr(ip_str);   
+    } else {
+        printf("No free addresses available!\n");
+    }
+
     return sizeof(dhcp_packet);
 }
 
