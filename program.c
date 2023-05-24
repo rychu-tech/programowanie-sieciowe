@@ -139,8 +139,6 @@ int create_offer_packet(dhcp_packet *offer_packet, dhcp_packet *discovery_packet
     printf("%d\n", discovery_packet->xid);
     offer_packet->secs = 0; // No seconds elapsed
     offer_packet->flags = htons(0x8000); // Broadcast flag
-
-    // offer_packet->yiaddr.s_addr = inet_addr(DHCP_IP_RANGE_START); // Offered IP address
     offer_packet->siaddr.s_addr = inet_addr(DHCP_SERVER_IP); // Server address 
     offer_packet->ciaddr.s_addr = 0;
     offer_packet->giaddr.s_addr = 0;
@@ -175,7 +173,15 @@ int create_offer_packet(dhcp_packet *offer_packet, dhcp_packet *discovery_packet
     offer_packet->options[21] = 58; // Renewal Time option
     offer_packet->options[22] = 4; // Option data length
     *(uint32_t *)(&offer_packet->options[23]) = htonl(RENEWAL_TIME); // Convert renewal time to network byte order and store in packet
-    offer_packet->options[27] = 255; // End option
+
+    offer_packet->options[27] = 54;
+    offer_packet->options[28] = 4;
+    offer_packet->options[29] = 192;
+    offer_packet->options[30] = 168;
+    offer_packet->options[31] = 1;
+    offer_packet->options[32] = 1;
+
+    offer_packet->options[33] = 255; // End option
 
 
     ip_address* free_ip = get_free_ip(pool, offer_packet->chaddr);
@@ -215,11 +221,6 @@ int create_ack_packet(dhcp_packet *ack_packet, dhcp_packet *request_packet, uint
     ack_packet->xid = request_packet->xid;
     ack_packet->secs = 0; // No seconds elapsed
     ack_packet->flags = htons(0x8000); // Broadcast flag
-
-    
-
-    // ack_packet->yiaddr.s_addr = inet_addr(inet_ntoa(*(struct in_addr *)&requested_ip)); // Assigned IP address
-    // ack_packet->yiaddr.s_addr = inet_addr("192.168.1.154");
     ack_packet->siaddr.s_addr = inet_addr(DHCP_SERVER_IP); // Server address 
     ack_packet->ciaddr.s_addr = 0;
     ack_packet->giaddr.s_addr = 0;
@@ -254,8 +255,15 @@ int create_ack_packet(dhcp_packet *ack_packet, dhcp_packet *request_packet, uint
     ack_packet->options[21] = 58; // Renewal Time option
     ack_packet->options[22] = 4; // Option data length
     *(uint32_t *)(&ack_packet->options[23]) = htonl(RENEWAL_TIME); // Convert renewal time to network byte order and store in packet
-    ack_packet->options[27] = 255; // End option
 
+    ack_packet->options[27] = 54;
+    ack_packet->options[28] = 4;
+    ack_packet->options[29] = 192;
+    ack_packet->options[30] = 168;
+    ack_packet->options[31] = 1;
+    ack_packet->options[32] = 1;
+
+    ack_packet->options[33] = 255; // End option
 
 
     ip_address* free_ip = get_free_ip(pool, ack_packet->chaddr);
